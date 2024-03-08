@@ -2,6 +2,8 @@ import streamlit as st
 import plotly.graph_objects as go
 import math
 import app_S7_vibrations.calcs as calcs
+import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
 
 st.title("Design of Pedestrian-Induced Vibrations according to CSA S7")
 
@@ -34,8 +36,8 @@ bridge = calcs.PedestrianBridge(
     # mmi = mmi_value,
 )
 
-vert_results = calcs.S7_vertical_results(bridge)
-vert_comfort = calcs.S7_vertical_comfort(bridge)
+vert_results = calcs.S7_results(bridge, 'vertical')
+vert_comfort = calcs.S7_comfort(bridge, 'vertical')
 
 # create figure for vertical accelerations
 fig1 = go.Figure()
@@ -130,5 +132,56 @@ col1, col2 = st.columns(2, gap="medium")
 
 st.plotly_chart(fig1)
 
-for t_class, comfort in vert_comfort.items():
-    st.markdown(f"{t_class} : {comfort} Comfort")
+#for t_class, comfort in vert_comfort.items():
+#    st.markdown(f"{t_class} : {comfort} Comfort")
+
+
+# Matplotlib alternative
+
+fig2, ax = plt.subplots()
+
+# Add acceleration results
+for t_class in vert_results:
+    x_values = [result[1] for result in vert_results[t_class]]
+    y_values = [result[2] for result in vert_results[t_class]]
+    # Plot lines
+    ax.scatter(x_values, y_values,
+               label=f"{t_class} ({calcs.S7_PED_DENSITIES[t_class]} ped/m^2)")
+
+COMFORT_COLORS = ["LightSkyBlue", "LightSeagreen", "Lemonchiffon", "Firebrick"]
+previous_limit = 0
+
+# Create a list to hold the proxy artists for the legend
+comfort_patches = []
+
+# Add shapes and legends for different comfort levels
+for idx, (comfort, limit) in enumerate(calcs.COMFORT_LEVELS_VERTICAL.items()):
+    if limit == float('inf'):
+        limit = previous_limit + max([result[2] for results in vert_results.values() 
+                                      for result in results])
+
+    ax.fill_between([1,13], previous_limit,
+                    limit,
+                    facecolor=COMFORT_COLORS[idx],
+                    alpha=0.3)
+    
+    # Create a patch with the same color as the fill_between and add it to the list
+    comfort_patches.append(mpatches.Patch(color=COMFORT_COLORS[idx], label=f'{comfort} Comfort', alpha=0.5))
+
+    previous_limit = limit
+
+ax.set_xlim([1,13])
+ax.set_ylim([min([result[2]for results in vert_results.values() 
+                  for result in results]),
+             max([result[2]for results in vert_results.values() 
+                  for result in results])+1])
+
+ax.set_title("Bridge Vertical Maximum Accelerations")
+ax.set_xlabel("Critical Vertical Frequency (Hz)")
+ax.set_ylabel("Acceleration (m/s^2)")
+
+# Add both original and comfort level legends to the plot outside on right side.
+plt.legend(handles=ax.get_legend_handles_labels()[0] + comfort_patches,
+           bbox_to_anchor=(1.05, 1), loc='upper left')
+
+st.pyplot(fig2)

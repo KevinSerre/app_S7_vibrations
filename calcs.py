@@ -93,41 +93,33 @@ class PedestrianBridge:
         except:
             return []
 
-    def calculate_max_vertical_acceleration(
+    def calculate_max_acceleration(
         self,
         d: float,
         mass: float,
         n: int,
         f_n: float,
+        direction: str,
     ) -> float:
         """
         Returns the maximum vertical acceleration of the pedestrian bridge as per CSA S7 Cl.7.3.3.7.
         Assumes the bridge is a simply-supported beam with a distributed mass and a distributed harmonic loading along the length.
-        """
 
-        f_s = expected_vertical_walking_frequency(d)
-        m = vertical_resonating_harmonic(f_n, f_s)
-        n_eq = equivalent_number_of_pedestrians(d, self.L, self.B, self.damping)
-        load = vertical_harmonic_load(m, n_eq) * self.B
-        return beam_bending_max_acceleration(n, mass, self.damping, load)
-
-    def calculate_max_lateral_acceleration(
-        self,
-        d: float,
-        mass: float,
-        n: int,
-        f_n: float,
-    ) -> float:
+        'direction' can be either 'vertical' or 'lateral.
         """
-        Returns the maximum lateral acceleration of the pedestrian bridge as per CSA S7 Cl.7.3.3.7.
-        Assumes the bridge is a simply-supported beam with a distributed mass and a distributed harmonic loading along the length.
-        """
+        if direction == "vertical":
+            f_s = expected_vertical_walking_frequency(d)
+            m = vertical_resonating_harmonic(f_n, f_s)
+            n_eq = equivalent_number_of_pedestrians(d, self.L, self.B, self.damping)
+            load = vertical_harmonic_load(m, n_eq) * self.B
+            return beam_bending_max_acceleration(n, mass, self.damping, load)
 
-        f_s = expected_lateral_walking_frequency(d)
-        m = lateral_resonating_harmonic(f_n, f_s)
-        n_eq = equivalent_number_of_pedestrians(d, self.L, self.B, self.damping)
-        load = lateral_harmonic_load(m, n_eq) * self.B
-        return beam_bending_max_acceleration(n, mass, self.damping, load)
+        elif direction == "lateral":
+            f_s = expected_lateral_walking_frequency(d)
+            m = lateral_resonating_harmonic(f_n, f_s)
+            n_eq = equivalent_number_of_pedestrians(d, self.L, self.B, self.damping)
+            load = lateral_harmonic_load(m, n_eq) * self.B
+            return beam_bending_max_acceleration(n, mass, self.damping, load)
 
 
 # general functions : 
@@ -401,59 +393,80 @@ def lateral_harmonic_load(
         return 0    # to avoid error in acceleration calculation
 
 
-def S7_vertical_results(
+def S7_results(
     bridge: PedestrianBridge,
+    direction: str,
 ) -> dict[str: list[ tuple[int, float, float]]]:
     """
-    Returns a dictionnary containing the vertical accelerations of the pedestrian bridge as per CSA S7 Cl.7.3.3.7 
+    Returns a dictionnary containing the max accelerations of the pedestrian bridge as per CSA S7 Cl.7.3.3.7 
     for each critical frequencies and for each traffic class defined in CSA S7 Table 7.1 for the two conditions :
         - unoccupied
         - occupied
     Assumes the bridge is a simply-supported beam with a distributed mass and a distributed harmonic loading along the length.
+    
+    'direction' can be either 'vertical' or 'lateral'.
     """
     # store initial mass as unoccupied
     mass_unoccupied = bridge.mass
     
-    vert_acc_unocc = {}
-    vert_acc_occ = {}
+    acc_unocc = {}
+    acc_occ = {}
+
     for (t_class, d) in S7_PED_DENSITIES.items():
         # reset mass to unoccupied
         bridge.mass = mass_unoccupied
+
         # calculate frequencies and accelerations for unoccupied structure
-        freqs_unocc = critical_vertical_frequencies(bridge.bending_frequencies(), bridge.torsion_frequencies())
-        accelerations_unocc = [(n, f_n, bridge.calculate_max_vertical_acceleration(d, bridge.mass, n, f_n)) for (n, f_n) in freqs_unocc]
-        vert_acc_unocc.update({t_class: accelerations_unocc})
+        if direction == "vertical":
+            freqs_unocc = critical_vertical_frequencies(bridge.bending_frequencies(), bridge.torsion_frequencies())
+
+        elif direction == "lateral":
+            freqs_unocc = critical_lateral_frequencies(bridge.lateral_frequencies())
+            
+        accelerations_unocc = [(n, f_n, bridge.calculate_max_acceleration(d, bridge.mass, n, f_n, direction)) for (n, f_n) in freqs_unocc]
+        acc_unocc.update({t_class: accelerations_unocc})
 
         # modify initial mass considering pedestrian density
         bridge.mass = mass_unoccupied + mass_pedestrians(d, bridge.L, bridge.B)
+
         # calculate frequencies and accelerations for occupied structure
-        freqs_occ = critical_vertical_frequencies(bridge.bending_frequencies(), bridge.torsion_frequencies())
-        accelerations_occ = [(n, f_n, bridge.calculate_max_vertical_acceleration(d, bridge.mass, n, f_n)) for (n, f_n) in freqs_occ]
-        vert_acc_occ.update({t_class: accelerations_occ})
+        if direction == "vertical":
+            freqs_occ = critical_vertical_frequencies(bridge.bending_frequencies(), bridge.torsion_frequencies())
+
+        elif direction == "lateral":
+            freqs_occ = critical_lateral_frequencies(bridge.lateral_frequencies())
+        
+        accelerations_occ = [(n, f_n, bridge.calculate_max_acceleration(d, bridge.mass, n, f_n,  direction)) for (n, f_n) in freqs_occ]
+        acc_occ.update({t_class: accelerations_occ})
 
     # reset mass to intial mass
     bridge.mass = mass_unoccupied
 
     # merge both dicts into one 
-    dict_to_reorder = {'unoccupied': vert_acc_unocc, 'occupied': vert_acc_occ}
+    dict_to_reorder = {'unoccupied': acc_unocc, 'occupied': acc_occ}
+
     # reorder it to have 't_class' as the first level key
     dict_reordered = reorder_dict(dict_to_reorder)
+
     # merge results for unoccupied and occupied :
     dict_results = merge_data(dict_reordered)
 
     return dict_results
 
 
-def S7_vertical_max_acceleration(
+def S7_max_acceleration(
     bridge: PedestrianBridge,
+    direction: str,
 ) -> dict[str: float]:
     """
-    Returns a dictionnary containing the maximum vertical acceleration of the pedestrian bridge as per CSA S7 Cl.7.3.3.7 
+    Returns a dictionnary containing the maximum acceleration of the pedestrian bridge as per CSA S7 Cl.7.3.3.7 
     for each traffic class defined in CSA S7 Table 7.1.
     Assumes the bridge is either unoccupied or occupied when calculating frequencies and maximum accelerations.
     Assumes the bridge is a simply-supported beam with a distributed mass and a distributed harmonic loading along the length.
+
+    'direction' can be either 'vertical' or 'lateral'.
     """
-    results = S7_vertical_results(bridge) 
+    results = S7_results(bridge, direction) 
     
     max_acceleration = {}
     for t_class, values in results.items():
@@ -463,91 +476,22 @@ def S7_vertical_max_acceleration(
     return max_acceleration
 
 
-def S7_vertical_comfort(
+def S7_comfort(
     bridge: PedestrianBridge,
+    direction: str,
 ) -> dict[str: str]:
     """
     Returns a dictionnary containing the maximum vertical acceleration of the pedestrian bridge as per CSA S7 Cl.7.3.3.7 
     for each traffic class defined in CSA S7 Table 7.1.
     Assumes the bridge is either unoccupied or occupied when calculating frequencies and maximum accelerations.
     Assumes the bridge is a simply-supported beam with a distributed mass and a distributed harmonic loading along the length.
+
+    'direction' can be either 'vertical' or 'lateral'.
     """
-    max_accelerations = S7_vertical_max_acceleration(bridge) 
+    max_accelerations = S7_max_acceleration(bridge, direction) 
     
-    return get_comfort_levels(max_accelerations, COMFORT_LEVELS_VERTICAL)
-
-
-def S7_lateral_results(
-    bridge: PedestrianBridge,
-) -> dict[str: list[ tuple[int, float, float]]]:
-    """
-    Returns a dictionnary containing the lateral accelerations of the pedestrian bridge as per CSA S7 Cl.7.3.3.7 
-    for each critical frequencies and for each traffic class defined in CSA S7 Table 7.1 for the two conditions :
-        - unoccupied
-        - occupied
-    Assumes the bridge is a simply-supported beam with a distributed mass and a distributed harmonic loading along the length.
-    """
-    # store initial mass as unoccupied
-    mass_unoccupied = bridge.mass
+    if direction == "vertical":
+        return get_comfort_levels(max_accelerations, COMFORT_LEVELS_VERTICAL)
     
-    vert_acc_unocc = {}
-    vert_acc_occ = {}
-    for (t_class, d) in S7_PED_DENSITIES.items():
-        # reset mass to unoccupied
-        bridge.mass = mass_unoccupied
-        # calculate frequencies and accelerations for unoccupied structure
-        freqs_unocc = critical_lateral_frequencies(bridge.lateral_frequencies())
-        accelerations_unocc = [(n, f_n, bridge.calculate_max_lateral_acceleration(d, bridge.mass, n, f_n)) for (n, f_n) in freqs_unocc]
-        vert_acc_unocc.update({t_class: accelerations_unocc})
-
-        # modify initial mass considering pedestrian density
-        bridge.mass = mass_unoccupied + mass_pedestrians(d, bridge.L, bridge.B)
-        # calculate frequencies and accelerations for occupied structure
-        freqs_occ = critical_lateral_frequencies(bridge.lateral_frequencies())
-        accelerations_occ = [(n, f_n, bridge.calculate_max_lateral_acceleration(d, bridge.mass, n, f_n)) for (n, f_n) in freqs_occ]
-        vert_acc_occ.update({t_class: accelerations_occ})
-
-    # reset mass to intial mass
-    bridge.mass = mass_unoccupied
-
-    # merge both dicts into one 
-    dict_to_reorder = {'unoccupied': vert_acc_unocc, 'occupied': vert_acc_occ}
-    # reorder it to have 't_class' as the first level key
-    dict_reordered = reorder_dict(dict_to_reorder)
-    # merge results for unoccupied and occupied :
-    dict_results = merge_data(dict_reordered)
-
-    return dict_results
-
-
-def S7_lateral_max_acceleration(
-    bridge: PedestrianBridge,
-) -> dict[str: float]:
-    """
-    Returns a dictionnary containing the maximum lateral acceleration of the pedestrian bridge as per CSA S7 Cl.7.3.3.7 
-    for each traffic class defined in CSA S7 Table 7.1.
-    Assumes the bridge is either unoccupied or occupied when calculating frequencies and maximum accelerations.
-    Assumes the bridge is a simply-supported beam with a distributed mass and a distributed harmonic loading along the length.
-    """
-    results = S7_lateral_results(bridge) 
-    
-    max_acceleration = {}
-    for t_class, values in results.items():
-        max_value = max(values, key=lambda x: x[2])[2]
-        max_acceleration[t_class] = max_value
-    
-    return max_acceleration
-
-
-def S7_lateral_comfort(
-    bridge: PedestrianBridge,
-) -> dict[str: str]:
-    """
-    Returns a dictionnary containing the maximum lateral acceleration of the pedestrian bridge as per CSA S7 Cl.7.3.3.7 
-    for each traffic class defined in CSA S7 Table 7.1.
-    Assumes the bridge is either unoccupied or occupied when calculating frequencies and maximum accelerations.
-    Assumes the bridge is a simply-supported beam with a distributed mass and a distributed harmonic loading along the length.
-    """
-    max_accelerations = S7_lateral_max_acceleration(bridge) 
-    
-    return get_comfort_levels(max_accelerations, COMFORT_LEVELS_LATERAL)
+    elif direction == "lateral":
+        return get_comfort_levels(max_accelerations, COMFORT_LEVELS_LATERAL)
